@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Curves Adjustment</title>
+<style>
+    canvas {
+        border: 1px solid black;
+    }
+    #dropArea {
+        border: 2px dashed gray;
+        padding: 10px;
+        margin-bottom: 10px;
+        width: 100%; /* Expand drop area to full width */
+        height: 150px;
+    }
+    #dropArea.highlight {
+        border-color: blue;
+    }
+    .button {
+        display: inline-block;
+        padding: 10px 20px;
+        background-color: #4CAF50;
+        color: white;
+        text-align: center;
+        text-decoration: none;
+        font-size: 16px;
+        margin-right: 10px;
+        cursor: pointer;
+    }
+    #fileInput {
+        display: none; /* Hide the file input by default */
+    }
+</style>
+</head>
+<body>
+<h1>Curves Adjustment</h1>
+<div id="dropArea">
+    <p>Drag and drop an image here or</p>
+    <a href="#" id="selectFileLink">Click to choose a file</a> <!-- File selection link -->
+    <input type="file" id="fileInput"> <!-- Make sure the file input is visible -->
+</div>
+<canvas id="curveCanvas" width="400" height="200"></canvas>
+<canvas id="imageCanvas" width="400" height="400"></canvas>
+<div>
+    <button class="button" id="resetButton">Reset Filters</button>
+    <button class="button" id="applyFiltersButton">Apply Filters</button> <!-- Add Apply Filters button -->
+    <button class="button" id="downloadButton">Download Image</button>
+</div>
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const dropArea = document.getElementById('dropArea');
+    const selectFileLink = document.getElementById('selectFileLink'); // File selection link
+    const curveCanvas = document.getElementById('curveCanvas');
+    const curveCtx = curveCanvas.getContext('2d');
+    const imageCanvas = document.getElementById('imageCanvas');
+    const imageCtx = imageCanvas.getContext('2d');
+    const resetButton = document.getElementById('resetButton');
+    const applyFiltersButton = document.getElementById('applyFiltersButton'); // Apply Filters button
+    const downloadButton = document.getElementById('downloadButton');
+    let dragging = false;
+    let offsetX, offsetY;
+    let originalImage = null; // Store the original image
+
+    // Default control points
+    let cp1x = 0.25, cp1y = 0.25;
+    let cp2x = 0.75, cp2y = 0.75;
+
+    const drawCurve = () => {
+        curveCtx.clearRect(0, 0, curveCanvas.width, curveCanvas.height);
+        curveCtx.beginPath();
+        const points = [];
+        for (let i = 0; i <= 400; i++) {
+            const x = i / 400;
+            const y = 1 - cubicInterpolation(cp1x, cp1y, cp2x, cp2y, x);
+            points.push({x: i, y: y * 200});
+        }
+        curveCtx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            curveCtx.lineTo(points[i].x, points[i].y);
+        }
+        curveCtx.strokeStyle = 'black';
+        curveCtx.lineWidth = 2;
+        curveCtx.stroke();
+    };
+
+    const drawImage = (img) => {
+        // Resize canvas to match image dimensions
+        imageCanvas.width = img.width;
+        imageCanvas.height = img.height;
+        imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+        imageCtx.drawImage(img, 0, 0, imageCanvas.width, imageCanvas.height);
+        originalImage = img; // Store the original image
+    };
+
+    const applyFilters = () => {
+        if (!originalImage) return; // Return if no original image
+
+        const imageData = imageCtx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+        const data = imageData.data;
+        const length = data.length;
+
+        const curve1 = generateCurve(cp1x, cp1y);
+        const curve2 = generateCurve(cp2x, cp2y);
+
+        for (let y = 0; y < imageCanvas.height; y++) {
+            for (let x = 0; x < imageCanvas.width; x++) {
+                const index = (y * imageCanvas.width + x) * 4;
+                data[index] = applyCurve(data[index], curve1);
+                data[index + 1] = applyCurve(data[index + 1], curve1);
+                data[index + 2] = applyCurve(data[index + 2], curve1);
+
+                data[index] = applyCurve(data[index], curve2);
+                data[index + 1] = applyCurve(data[index + 1], curve2);
+                data[index + 2] = applyCurve(data[index + 2], curve2);
+            }
+        }
+
+        imageCtx.putImageData(imageData, 0, 0);
+    };
+
+    const generateCurve = (x, y) => {
+        const curve = [];
+        for (let i = 0; i <= 255; i++) {
+            curve[i] = Math.round((Math.pow(i / 255, x) * 255 * y) + (i * (1 - y)));
+        }
+        return curve;
+    };
+
+    const applyCurve = (value, curve) => {
+        return curve[value];
+    };
+
+    const cubicInterpolation = (x0, y0, x1, y1, x) => {
+        const t = (x - x0) / (x1 - x0);
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+        return h00 * y0 + h10 * (x1 - x0) * cp1y + h01 * y1 + h11 * (x1 - x0) * cp2y;
+    };
+
+    const handleMouseDown = (e) => {
+        const rect = curveCanvas.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        dragging = true;
+        handleMouseMove(e); // Handle initial position
+    };
+
+    const handleMouseUp = () => {
+        dragging = false;
+    };
+
+    const handleMouseMove = (e) => {
+        if (!dragging) return;
+        const rect = curveCanvas.getBoundingClientRect();
+        const newX = Math.max(0, Math.min((e.clientX - rect.left) / curveCanvas.width, 1));
+        let newY = Math.max(0, Math.min((e.clientY - rect.top) / curveCanvas.height, 1));
+        newY = Math.round(newY / 0.02) * 0.02; // Snap to nearest 0.02 interval
+
+        // Adjust the rate of change
+        const rate = 0.01;
+        if (offsetY < curveCanvas.height / 2) {
+            // Smoothly adjust control point 1
+            cp1x = smoothAdjustment(cp1x, newX, rate);
+            cp1y = smoothAdjustment(cp1y, newY, rate);
+        } else {
+            // Smoothly adjust control point 2
+            cp2x = smoothAdjustment(cp2x, newX, rate);
+            cp2y = smoothAdjustment(cp2y, newY, rate);
+        }
+        drawCurve();
+    };
+
+    const smoothAdjustment = (current, target, rate) => {
+        return current + (target - current) * rate;
+    };
+
+    const handleFileSelect = (e) => {
+        const file = e.target.files[0];
+        loadAndDrawImage(file);
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        dropArea.classList.add('highlight');
+    };
+
+    const handleDragLeave = () => {
+        dropArea.classList.remove('highlight');
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        dropArea.classList.remove('highlight');
+        const file = e.dataTransfer.files[0];
+        loadAndDrawImage(file);
+    };
+
+    const loadAndDrawImage = (file) => {
+        const reader = new FileReader();
+        reader.onload = function (event) {
+            const img = new Image();
+            img.onload = function () {
+                drawImage(img);
+                applyFilters(); // Apply filters after the image is loaded
+            };
+            img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const resetFilters = () => {
+        cp1x = 0.25;
+        cp1y = 0.25;
+        cp2x = 0.75;
+        cp2y = 0.75;
+        drawCurve();
+        if (originalImage) {
+            drawImage(originalImage); // Redraw the original image
+            applyFilters(); // Apply filters to the original image
+        }
+    };
+
+    const downloadImage = () => {
+        const link = document.createElement('a');
+        link.download = 'filtered_image.png';
+        link.href = imageCanvas.toDataURL();
+        link.click();
+    };
+
+    const applyFiltersAndRedraw = () => {
+        applyFilters();
+        drawImage(originalImage);
+    };
+
+    fileInput.addEventListener('change', handleFileSelect);
+    dropArea.addEventListener('dragover', handleDragOver);
+    dropArea.addEventListener('dragleave', handleDragLeave);
+    dropArea.addEventListener('drop', handleDrop);
+
+    curveCanvas.addEventListener('mousedown', handleMouseDown);
+    curveCanvas.addEventListener('mouseup', handleMouseUp);
+    curveCanvas.addEventListener('mousemove', handleMouseMove);
+
+    resetButton.addEventListener('click', resetFilters);
+    downloadButton.addEventListener('click', downloadImage);
+    applyFiltersButton.addEventListener('click', applyFiltersAndRedraw); // Add event listener to Apply Filters button
+
+    selectFileLink.addEventListener('click', function() {
+        fileInput.click(); // Trigger the file input click event
+    });
+
+    drawCurve(); // Initial draw
+</script>
+</body>
+</html>
